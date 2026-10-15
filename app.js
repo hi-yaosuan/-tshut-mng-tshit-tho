@@ -4,7 +4,7 @@ import { templates, templateDocs, CATEGORIES } from './templates.js';
 import { firebaseConfig } from './firebase-config.js';
 
 // 每次上版改這裡，並在 CHANGELOG.md 記錄；「我的」最下面會顯示，用來確認線上是不是最新版
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.1.1';
 
 const SLOTS = ['早餐', '午餐', '晚餐', '宵夜'];
 const SOURCE = { rent: '租借', own: '自有', buy: '要買' };
@@ -1081,6 +1081,9 @@ function syncError(e) {
   if (tripId === 'sample' && store.isEmpty()) { await loadDemo(); justCreated = true; }
   if (justCreated) history.replaceState(null, '', tripUrl(tripId));
 
+  // 本機行程（LocalStore）訂閱時會「立刻」回呼，所以 asked 一定要在 subscribe 之前宣告
+  let asked = false;
+
   store.subscribe('meta', (docs, { fromCache }) => {
     S.trip = docs.find((d) => d.id === 'trip') || {};
     // 第一次開某個雲端行程時，快取是空的，要等伺服器回應才知道行程存不存在
@@ -1090,9 +1093,9 @@ function syncError(e) {
     askMeOnce();
   });
   store.subscribe('units', (docs) => { S.units = docs.sort(byOrder); schedule(); askMeOnce(); });
+  for (const c of ['gear', 'meals', 'items', 'expenses']) store.subscribe(c, (docs) => { S[c] = docs; schedule(); });
 
   // 第一次打開這趟行程（還沒選過身分）就問一次「你是哪個單位」；剛建立的雲端行程再提醒分享
-  let asked = false;
   function askMeOnce() {
     if (asked || !S.trip.name || !S.units.length) return;
     asked = true;
@@ -1100,5 +1103,4 @@ function syncError(e) {
     if (!unit(ui.me)) setTimeout(() => pickMe(remindShare ? () => toast('行程建立好了，按右上角的分享鍵把連結傳給大家') : null), 300);
     else if (remindShare) setTimeout(shareTrip, 300);
   }
-  for (const c of ['gear', 'meals', 'items', 'expenses']) store.subscribe(c, (docs) => { S[c] = docs; schedule(); });
 })();
