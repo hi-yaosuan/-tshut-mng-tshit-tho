@@ -3,6 +3,9 @@ import { sample } from './sample.js';
 import { templates, templateDocs, CATEGORIES } from './templates.js';
 import { firebaseConfig } from './firebase-config.js';
 
+// 每次上版改這裡，並在 CHANGELOG.md 記錄；「我的」最下面會顯示，用來確認線上是不是最新版
+const APP_VERSION = '1.1.0';
+
 const SLOTS = ['早餐', '午餐', '晚餐', '宵夜'];
 const SOURCE = { rent: '租借', own: '自有', buy: '要買' };
 const WEEK = '日一二三四五六';
@@ -128,8 +131,32 @@ function showPage(name, html, mount) {
   scrollTo(0, 0);
 }
 
+// 從貼上的文字找出行程代碼：完整連結（…?t=代碼）或只有代碼
+function parseTripCode(text) {
+  const s = String(text || '').trim();
+  const m = s.match(/[?&]t=([a-z0-9]+)/i) || s.match(/^([a-z0-9]{8,32})$/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+function mountHome() {
+  const form = $('#open-trip');
+  if (!form) return;
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const inp = form.elements.link;
+    const code = parseTripCode(inp.value);
+    if (!code) {
+      inp.setCustomValidity('看起來不是行程連結，請貼上像 …?t=abc123 這樣的網址');
+      inp.reportValidity();
+      inp.oninput = () => inp.setCustomValidity('');
+      return;
+    }
+    location.href = tripUrl(code);
+  };
+}
+
 function render() {
-  if (ui.mode === 'home') return ui.creating ? showPage('setup', viewSetup(), mountSetup) : showPage('home', viewHome());
+  if (ui.mode === 'home') return ui.creating ? showPage('setup', viewSetup(), mountSetup) : showPage('home', viewHome(), mountHome);
   if (!S.loaded) return showPage('loading', `<div class="hero"><div class="hero-icon"><i class="ti ti-loader-2 spin"></i></div><p>載入中…</p><p class="hint">如果一直停在這裡，請檢查網路連線。</p></div>`);
   if (!S.trip.name) {
     return isLocal(tripId) ? showPage('setup', viewSetup(), mountSetup)
@@ -394,10 +421,11 @@ function viewMe() {
       <button class="add-line" style="width:100%;margin-top:6px" data-act="new-unit"><i class="ti ti-plus"></i> 新增單位</button>
     </div>
     ${isLocal(tripId) ? '' : `<div class="section-title"><span>分享</span></div>
-    <div class="card tap" data-act="share"><div class="row"><i class="ti ti-share"></i><div class="grow">分享行程連結<div class="sub">拿到連結的人都能一起編輯</div></div><i class="ti ti-chevron-right"></i></div></div>`}
+    <div class="card tap" data-act="share"><div class="row"><i class="ti ti-share"></i><div class="grow">分享行程連結<div class="sub">拿到連結的人都能一起編輯 · 行程代碼 <span class="trip-code">${esc(tripId)}</span></div></div><i class="ti ti-chevron-right"></i></div></div>`}
     <div class="section-title"><span>資料</span></div>
     ${CLOUD ? `<a class="card tap trip-link" href="${esc(tripUrl())}"><div class="row"><i class="ti ti-list"></i><div class="grow">所有行程／建立新行程</div><i class="ti ti-chevron-right"></i></div></a>` : ''}
-    <div class="card tap" data-act="restart"><div class="row"><i class="ti ti-trash neg"></i><div class="grow neg">${isLocal(tripId) ? '清空資料，重新開始' : '刪除這趟行程'}</div></div></div>`;
+    <div class="card tap" data-act="restart"><div class="row"><i class="ti ti-trash neg"></i><div class="grow neg">${isLocal(tripId) ? '清空資料，重新開始' : '刪除這趟行程'}</div></div></div>
+    <p class="version">露營分工 v${APP_VERSION}</p>`;
   return html;
 }
 
@@ -484,8 +512,17 @@ function viewHome() {
         <div class="row"><div class="grow"><div class="title">${esc(r.name)}</div>
         <div class="sub">${esc([r.location, range(r)].filter(Boolean).join(' · '))}</div></div><i class="ti ti-chevron-right"></i></div></a>`).join('') : ''}
     <button class="btn primary block" data-act="home-new"><i class="ti ti-plus"></i> 建立新行程</button>
+
+    <div class="section-title"><span>打開別人分享的行程</span></div>
+    <form class="card open-trip" id="open-trip" novalidate>
+      <div class="row" style="gap:8px">
+        <input name="link" placeholder="貼上行程連結或代碼" autocomplete="off" aria-label="行程連結或代碼">
+        <button type="submit" class="btn small">打開</button>
+      </div>
+      <div class="hint">「我的行程」只會列出在這台裝置上打開過的行程。換手機或換瀏覽器時，貼上連結打開一次，之後就會出現在清單裡。</div>
+    </form>
     <button type="button" class="link-btn" data-act="demo">先看看示範（上次武陵農場的資料）</button>
-    ${list.length ? '<p class="hint" style="text-align:center">這裡只列出在這台裝置上打開過的行程。朋友分享的連結打開一次，就會出現在這裡。</p>' : ''}`;
+    <p class="version">v${APP_VERSION}</p>`;
 }
 
 // 把 LocalStore 格式的資料（{ 集合: { id: 資料 } }）寫進某個 store；meta 最後寫
@@ -1050,15 +1087,18 @@ function syncError(e) {
     if (S.trip.name || !fromCache) S.loaded = true;
     if (S.trip.name && !isLocal(tripId)) saveRecent({ id: tripId, name: S.trip.name, location: S.trip.location || '', startDate: S.trip.startDate, endDate: S.trip.endDate });
     schedule();
-    if (justCreated && S.trip.name) {
-      justCreated = false;
-      setTimeout(() => {
-        if (isLocal(tripId)) { if (!unit(ui.me)) pickMe(); }
-        else if (unit(ui.me)) shareTrip();
-        else pickMe(() => toast('行程建立好了，按右上角的分享鍵把連結傳給大家'));
-      }, 300);
-    }
+    askMeOnce();
   });
-  store.subscribe('units', (docs) => { S.units = docs.sort(byOrder); schedule(); });
+  store.subscribe('units', (docs) => { S.units = docs.sort(byOrder); schedule(); askMeOnce(); });
+
+  // 第一次打開這趟行程（還沒選過身分）就問一次「你是哪個單位」；剛建立的雲端行程再提醒分享
+  let asked = false;
+  function askMeOnce() {
+    if (asked || !S.trip.name || !S.units.length) return;
+    asked = true;
+    const remindShare = justCreated && !isLocal(tripId);
+    if (!unit(ui.me)) setTimeout(() => pickMe(remindShare ? () => toast('行程建立好了，按右上角的分享鍵把連結傳給大家') : null), 300);
+    else if (remindShare) setTimeout(shareTrip, 300);
+  }
   for (const c of ['gear', 'meals', 'items', 'expenses']) store.subscribe(c, (docs) => { S[c] = docs; schedule(); });
 })();
